@@ -1,13 +1,11 @@
 package main
 
-/* ライブラリのインポート */
 import (
 	"./mydb"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
-	"html"
 	"net"
 	"net/http"
 	"net/http/fcgi"
@@ -16,7 +14,6 @@ import (
 /* APIのバージョン定義 */
 const version string = "1"
 
-/* コンストラクタ */
 type Response_Container struct {
 	Meta   Response_Meta `json:"meta"`
 	Result interface{}   `json:"result"`
@@ -55,7 +52,8 @@ type Response_Archives struct {
 
 /* ルーティング */
 func main() {
-	l, err := net.Listen("tcp", ":4000") // TCP 9000 番ポートで Listen
+	l, err := net.Listen("tcp", ":4000")
+	// l, err := net.Listen("unix", "/var/run/go-fcgi.sock")
 	if err != nil {
 		return
 	}
@@ -92,7 +90,6 @@ func Archives(w http.ResponseWriter, r *http.Request) {
 		var k Response_Archives
 		err := rows.Scan(&k.Id, &k.Title, &k.Link, &k.Img_tag, &k.Description, &k.Youtube_video_id, &k.Publish_date, &k.Insert_date, &k.Insert_year, &k.Insert_month, &k.Insert_day, &k.Impression_num, &k.Favorite_num, &k.Comment_num, &k.Comment_posted_at, &k.Comment_user_id, &k.Evaluate_point, &k.Total_point, &k.Channel_name, &k.Channel_key, &k.Channel_category_id, &k.Channel_description, &k.Channel_media_id, &k.Category_name, &k.Media_name)
 		if err != nil {
-			// fmt.Println(err)
 			WriteErrorLogFile(err)
 		}
 		archives = append(archives, k)
@@ -105,7 +102,6 @@ func Archives(w http.ResponseWriter, r *http.Request) {
 		container.Result = archives
 		outjson, err := json.Marshal(container)
 		if err != nil {
-			// fmt.Println(err) //TODO: change to log
 			WriteErrorLogFile(err)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -135,37 +131,22 @@ func Archives_Id(w http.ResponseWriter, r *http.Request) {
 		var k Response_Archives
 		err := rows.Scan(&k.Id, &k.Title, &k.Link, &k.Img_tag, &k.Description, &k.Youtube_video_id, &k.Publish_date, &k.Insert_date, &k.Insert_year, &k.Insert_month, &k.Insert_day, &k.Impression_num, &k.Favorite_num, &k.Comment_num, &k.Comment_posted_at, &k.Comment_user_id, &k.Evaluate_point, &k.Total_point, &k.Channel_name, &k.Channel_key, &k.Channel_category_id, &k.Channel_description, &k.Channel_media_id, &k.Category_name, &k.Media_name)
 		if err != nil {
-			// fmt.Println(err)
 			WriteErrorLogFile(err)
 		}
-		// fmt.Println(reflect.TypeOf(err))
 		archives = k
 	}
 
-	// JSON return
 	defer func() {
 		meta = Response_Meta{Message: "OK", Code: 200}
 		container.Meta = meta
 		container.Result = archives
 		outjson, err := json.Marshal(container)
 		if err != nil {
-			// fmt.Println(err) //TODO: change to log
 			WriteErrorLogFile(err)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, string(outjson))
 	}()
-}
-
-func Display(w http.ResponseWriter, r *http.Request) {
-	// val1とval2に設定された文字列を取得
-	val1 := r.FormValue("val1")
-	val2 := r.FormValue("val2")
-
-	// displayページのリクエストがくるとval1とval2を表示する
-	fmt.Fprintf(w, "<html><body>Input String: %s, %s</body></html>",
-		html.EscapeString(val1), html.EscapeString(val2))
-	// log.Printf("ListenAndServe: ", r)
 }
 
 func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +160,6 @@ func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 	container.Result = nil
 	outjson, err := json.Marshal(container)
 	if err != nil {
-		// fmt.Println(err) //TODO: change to log
 		WriteErrorLogFile(err)
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -188,6 +168,4 @@ func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 
 func WriteErrorLogFile(l error) {
 	fmt.Println(l)
-	// content := []byte(string(l) + "\n")
-	// ioutil.WriteFile("./log.txt", []byte(content), os.ModePerm)
 }
