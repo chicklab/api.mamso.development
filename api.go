@@ -12,8 +12,14 @@ import (
 	"strconv"
 )
 
-/* APIのバージョン定義 */
+// API Version
 const version string = "1"
+
+const (
+	limit_def  string = "20"  // query default limit Number
+	limit_max  string = "100" // query maximum limit Number
+	offset_def string = "0"   // query default offset Number
+)
 
 type Response_Container struct {
 	Meta   Response_Meta `json:"meta"`
@@ -51,38 +57,68 @@ type Response_Archives struct {
 	Media_name          string         `json:"media_name"`
 }
 
-/* ルーティング */
+// Routing
 func main() {
 	l, err := net.Listen("tcp", ":4000")
-	// l, err := net.Listen("unix", "/var/run/go-fcgi.sock")
 	if err != nil {
 		return
 	}
 	r := mux.NewRouter()
 	http.Handle("/", r)
-
-	r.HandleFunc("/v"+version+"/archives.json", Archives).Methods("GET")
-	r.HandleFunc("/v"+version+"/archives/{id}.json", Archives_Id)
-	// r.HandleFunc("/articles/{category}/", ArticlesCategoryHandler)
-	// r.HandleFunc("/articles/{category}/{id:[0-9]+}", ArticleHandler)
+	r.HandleFunc("/v"+version+"/archives.json", ArchivesHandler).Methods("GET")
+	r.HandleFunc("/v"+version+"/archives/{id}.json", ArchivesIdHandler)
+	r.HandleFunc("/v"+version+"/archives/{category}.json", ArchivesCategoryHandler).Methods("GET")
 	r.NotFoundHandler = http.HandlerFunc(NotFoundHandler)
 	fcgi.Serve(l, nil)
-
 }
 
-func Archives(w http.ResponseWriter, r *http.Request) {
+func ArchivesHandler(w http.ResponseWriter, r *http.Request) {
 
-	const (
-		limit_def  string = "20" // query default limit Number
-		limit_max  string = "25" // query maximum limit Number
-		offset_def string = "0"  // query default offset Number
-	)
+	var archives []Response_Archives
 
-	var (
-		container Response_Container
-		meta      Response_Meta
-		archives  []Response_Archives
-	)
+	// GetParams
+	count := r.URL.Query().Get("count")
+	cursor := r.URL.Query().Get("cursor")
+
+	// ValidateParams
+	if (!CheckDigit(count) && count != "") || (!CheckDigit(cursor) && cursor != "") {
+		ResponseJson(w, "Not Found", 404, nil)
+		return
+	}
+	if count == "" {
+		count = limit_def
+	}
+	if cursor == "" {
+		cursor = offset_def
+	}
+
+	archives = CreateArchivesQuery("limit " + count + " offset " + cursor)
+
+	defer func() {
+		ResponseJson(w, "OK", 200, archives)
+	}()
+}
+
+func ArchivesIdHandler(w http.ResponseWriter, r *http.Request) {
+
+	var archives []Response_Archives
+
+	vars := mux.Vars(r)
+	a := map[string]string{}
+	for f, v := range vars {
+		a[f] = v
+	}
+
+	archives = CreateArchivesQuery("where article_id = " + a["id"])
+
+	defer func() {
+		ResponseJson(w, "OK", 200, archives)
+	}()
+}
+
+func ArchivesCategoryHandler(w http.ResponseWriter, r *http.Request) {
+
+	var archives []Response_Archives
 
 	vars := mux.Vars(r)
 	// GetParams
@@ -90,8 +126,8 @@ func Archives(w http.ResponseWriter, r *http.Request) {
 	cursor := r.URL.Query().Get("cursor")
 
 	// ValidateParams
-	if (!checkDigit(count) && count != "") || (!checkDigit(cursor) && cursor != "") {
-		NotFoundAction(w)
+	if (!CheckDigit(count) && count != "") || (!CheckDigit(cursor) && cursor != "") {
+		ResponseJson(w, "Not Found", 404, nil)
 		return
 	}
 	if count == "" {
@@ -102,14 +138,31 @@ func Archives(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a := map[string]string{}
+	for f, v := range vars {
+		a[f] = v
+	}
+
+	archives = CreateArchivesQuery("where category_name = " + a["category"] + " limit " + count + " offset " + cursor)
+
+	defer func() {
+		ResponseJson(w, "OK", 200, archives)
+	}()
+}
+
+func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
+	// http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+	ResponseJson(w, "Not Found", 404, nil)
+}
+
+func CreateArchivesQuery(query string) []Response_Archives {
+
+	var archives []Response_Archives
+
 	db := mydb.MyDB{}
 	db.Connect()
 	defer db.Close()
 
-	for f, v := range vars {
-		a[f] = v
-	}
-	rows := db.Query("select article_id, article_title, article_link, article_img_tag, article_description, article_youtube_video_id, article_publish_date, article_insert_date, article_insert_year, article_insert_month, article_insert_day, article_impression_num, favorite_article_num, comment_num, comment_posted_at, comment_user_id, evaluate_point, total_point, channel_name, channel_key, channel_category_id, channel_description, channel_media_id, category_name, media_name from V_information limit " + count + " offset " + cursor)
+	rows := db.Query("select article_id, article_title, article_link, article_img_tag, article_description, article_youtube_video_id, article_publish_date, article_insert_date, article_insert_year, article_insert_month, article_insert_day, article_impression_num, favorite_article_num, comment_num, comment_posted_at, comment_user_id, evaluate_point, total_point, channel_name, channel_key, channel_category_id, channel_description, channel_media_id, category_name, media_name from V_information " + query)
 	defer rows.Close()
 
 	for rows.Next() {
@@ -120,74 +173,18 @@ func Archives(w http.ResponseWriter, r *http.Request) {
 		}
 		archives = append(archives, k)
 	}
-
-	// JSON return
-	defer func() {
-		meta = Response_Meta{Message: "OK", Code: 200}
-		container.Meta = meta
-		container.Result = archives
-		outjson, err := json.Marshal(container)
-		if err != nil {
-			WriteErrorLogFile(err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, string(outjson))
-	}()
+	return archives
 }
 
-func Archives_Id(w http.ResponseWriter, r *http.Request) {
+func ResponseJson(w http.ResponseWriter, message string, code int, archives interface{}) {
 
-	var container Response_Container
-	var meta Response_Meta
-	var archives Response_Archives
-
-	vars := mux.Vars(r)
-	a := map[string]string{}
-	db := mydb.MyDB{}
-	db.Connect()
-	defer db.Close()
-
-	for f, v := range vars {
-		a[f] = v
-	}
-	rows := db.Query("select article_id, article_title, article_link, article_img_tag, article_description, article_youtube_video_id, article_publish_date, article_insert_date, article_insert_year, article_insert_month, article_insert_day, article_impression_num, favorite_article_num, comment_num, comment_posted_at, comment_user_id, evaluate_point, total_point, channel_name, channel_key, channel_category_id, channel_description, channel_media_id, category_name, media_name from V_information " + "where article_id = " + a["id"])
-	defer rows.Close()
-
-	for rows.Next() {
-		var k Response_Archives
-		err := rows.Scan(&k.Id, &k.Title, &k.Link, &k.Img_tag, &k.Description, &k.Youtube_video_id, &k.Publish_date, &k.Insert_date, &k.Insert_year, &k.Insert_month, &k.Insert_day, &k.Impression_num, &k.Favorite_num, &k.Comment_num, &k.Comment_posted_at, &k.Comment_user_id, &k.Evaluate_point, &k.Total_point, &k.Channel_name, &k.Channel_key, &k.Channel_category_id, &k.Channel_description, &k.Channel_media_id, &k.Category_name, &k.Media_name)
-		if err != nil {
-			WriteErrorLogFile(err)
-		}
-		archives = k
-	}
-
-	defer func() {
-		meta = Response_Meta{Message: "OK", Code: 200}
-		container.Meta = meta
-		container.Result = archives
-		outjson, err := json.Marshal(container)
-		if err != nil {
-			WriteErrorLogFile(err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, string(outjson))
-	}()
-}
-
-func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
-	// http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
-	NotFoundAction(w)
-}
-
-func NotFoundAction(w http.ResponseWriter) {
-
-	var container Response_Container
-	var meta Response_Meta
-
-	meta = Response_Meta{Message: "Not Found", Code: 404}
+	var (
+		container Response_Container
+		meta      Response_Meta
+	)
+	meta = Response_Meta{Message: message, Code: code}
 	container.Meta = meta
-	container.Result = nil
+	container.Result = archives
 	outjson, err := json.Marshal(container)
 	if err != nil {
 		WriteErrorLogFile(err)
@@ -200,8 +197,7 @@ func WriteErrorLogFile(l error) {
 	fmt.Println(l)
 }
 
-// check str is all number
-func checkDigit(str string) bool {
+func CheckDigit(str string) bool {
 	flag := false
 	if _, err := strconv.Atoi(str); err == nil {
 		flag = true
