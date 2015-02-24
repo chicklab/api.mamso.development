@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/fcgi"
+	"strconv"
 )
 
 /* APIのバージョン定義 */
@@ -59,7 +60,8 @@ func main() {
 	}
 	r := mux.NewRouter()
 	http.Handle("/", r)
-	r.HandleFunc("/v"+version+"/archives.json", Archives)
+
+	r.HandleFunc("/v"+version+"/archives.json", Archives).Methods("GET")
 	r.HandleFunc("/v"+version+"/archives/{id}.json", Archives_Id)
 	// r.HandleFunc("/articles/{category}/", ArticlesCategoryHandler)
 	// r.HandleFunc("/articles/{category}/{id:[0-9]+}", ArticleHandler)
@@ -70,11 +72,35 @@ func main() {
 
 func Archives(w http.ResponseWriter, r *http.Request) {
 
-	var container Response_Container
-	var meta Response_Meta
-	var archives []Response_Archives
+	const (
+		limit_def  string = "20" // query default limit Number
+		limit_max  string = "25" // query maximum limit Number
+		offset_def string = "0"  // query default offset Number
+	)
+
+	var (
+		container Response_Container
+		meta      Response_Meta
+		archives  []Response_Archives
+	)
 
 	vars := mux.Vars(r)
+	// GetParams
+	count := r.URL.Query().Get("count")
+	cursor := r.URL.Query().Get("cursor")
+
+	// ValidateParams
+	if (!checkDigit(count) && count != "") || (!checkDigit(cursor) && cursor != "") {
+		NotFoundAction(w)
+		return
+	}
+	if count == "" {
+		count = limit_def
+	}
+	if cursor == "" {
+		cursor = offset_def
+	}
+
 	a := map[string]string{}
 	db := mydb.MyDB{}
 	db.Connect()
@@ -83,7 +109,7 @@ func Archives(w http.ResponseWriter, r *http.Request) {
 	for f, v := range vars {
 		a[f] = v
 	}
-	rows := db.Query("select article_id, article_title, article_link, article_img_tag, article_description, article_youtube_video_id, article_publish_date, article_insert_date, article_insert_year, article_insert_month, article_insert_day, article_impression_num, favorite_article_num, comment_num, comment_posted_at, comment_user_id, evaluate_point, total_point, channel_name, channel_key, channel_category_id, channel_description, channel_media_id, category_name, media_name from V_information")
+	rows := db.Query("select article_id, article_title, article_link, article_img_tag, article_description, article_youtube_video_id, article_publish_date, article_insert_date, article_insert_year, article_insert_month, article_insert_day, article_impression_num, favorite_article_num, comment_num, comment_posted_at, comment_user_id, evaluate_point, total_point, channel_name, channel_key, channel_category_id, channel_description, channel_media_id, category_name, media_name from V_information limit " + count + " offset " + cursor)
 	defer rows.Close()
 
 	for rows.Next() {
@@ -150,8 +176,12 @@ func Archives_Id(w http.ResponseWriter, r *http.Request) {
 }
 
 func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
-
 	// http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+	NotFoundAction(w)
+}
+
+func NotFoundAction(w http.ResponseWriter) {
+
 	var container Response_Container
 	var meta Response_Meta
 
@@ -168,4 +198,13 @@ func NotFoundHandler(w http.ResponseWriter, r *http.Request) {
 
 func WriteErrorLogFile(l error) {
 	fmt.Println(l)
+}
+
+// check str is all number
+func checkDigit(str string) bool {
+	flag := false
+	if _, err := strconv.Atoi(str); err == nil {
+		flag = true
+	}
+	return flag
 }
