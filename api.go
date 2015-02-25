@@ -57,6 +57,18 @@ type Response_Archives struct {
 	Media_name          string         `json:"media_name"`
 }
 
+type Response_Channels struct {
+	Id                string `json:"id"`
+	Name              string `json:"name"`
+	Url               string `json:"url"`
+	Description       string `json:"description"`
+	Key               string `json:"key"`
+	Archive_number    int    `json:"archive_number"`
+	Impression_number int    `json:"impression_number"`
+	Category_id       string `json:"channel_id"`
+	Category_name     string `json:"category_name"`
+}
+
 // Routing
 func main() {
 	l, err := net.Listen("tcp", ":4000")
@@ -67,7 +79,9 @@ func main() {
 	http.Handle("/", r)
 	r.HandleFunc("/v"+version+"/archives.json", ArchivesHandler).Methods("GET")
 	r.HandleFunc("/v"+version+"/archives/{id}.json", ArchivesIdHandler)
-	r.HandleFunc("/v"+version+"/archives/{category}.json", ArchivesCategoryHandler).Methods("GET")
+	r.HandleFunc("/v"+version+"/categories/{id}.json", CategoriesNameHandler).Methods("GET")
+	r.HandleFunc("/v"+version+"/channels.json", ChannelsHandler)
+	r.HandleFunc("/v"+version+"/channels/{id}.json", ChannelsNameHandler).Methods("GET")
 	r.NotFoundHandler = http.HandlerFunc(NotFoundHandler)
 	fcgi.Serve(l, nil)
 }
@@ -108,6 +122,11 @@ func ArchivesIdHandler(w http.ResponseWriter, r *http.Request) {
 	for f, v := range vars {
 		a[f] = v
 	}
+	// ValidateParams
+	if !CheckDigit(a["id"]) && a["id"] != "" {
+		ResponseJson(w, "Not Found", 404, nil)
+		return
+	}
 
 	archives = CreateArchivesQuery("where article_id = " + a["id"])
 
@@ -116,7 +135,7 @@ func ArchivesIdHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-func ArchivesCategoryHandler(w http.ResponseWriter, r *http.Request) {
+func CategoriesNameHandler(w http.ResponseWriter, r *http.Request) {
 
 	var archives []Response_Archives
 
@@ -125,24 +144,66 @@ func ArchivesCategoryHandler(w http.ResponseWriter, r *http.Request) {
 	count := r.URL.Query().Get("count")
 	cursor := r.URL.Query().Get("cursor")
 
-	// ValidateParams
-	if (!CheckDigit(count) && count != "") || (!CheckDigit(cursor) && cursor != "") {
-		ResponseJson(w, "Not Found", 404, nil)
-		return
-	}
 	if count == "" {
 		count = limit_def
 	}
 	if cursor == "" {
 		cursor = offset_def
 	}
-
 	a := map[string]string{}
 	for f, v := range vars {
 		a[f] = v
 	}
+	// ValidateParams
+	if (!CheckDigit(count) && count != "") || (!CheckDigit(cursor) && cursor != "") || (!CheckDigit(a["id"]) && a["id"] != "") {
+		ResponseJson(w, "Not Found", 404, nil)
+		return
+	}
 
-	archives = CreateArchivesQuery("where category_name = " + a["category"] + " limit " + count + " offset " + cursor)
+	archives = CreateArchivesQuery("where channel_category_id = " + a["id"] + " limit " + count + " offset " + cursor)
+
+	defer func() {
+		ResponseJson(w, "OK", 200, archives)
+	}()
+}
+
+func ChannelsHandler(w http.ResponseWriter, r *http.Request) {
+
+	var channels []Response_Channels
+
+	channels = CreateChannelsQuery("")
+
+	defer func() {
+		ResponseJson(w, "OK", 200, channels)
+	}()
+}
+
+func ChannelsNameHandler(w http.ResponseWriter, r *http.Request) {
+
+	var archives []Response_Archives
+
+	vars := mux.Vars(r)
+	// GetParams
+	count := r.URL.Query().Get("count")
+	cursor := r.URL.Query().Get("cursor")
+
+	if count == "" {
+		count = limit_def
+	}
+	if cursor == "" {
+		cursor = offset_def
+	}
+	a := map[string]string{}
+	for f, v := range vars {
+		a[f] = v
+	}
+	// ValidateParams
+	if (!CheckDigit(count) && count != "") || (!CheckDigit(cursor) && cursor != "") || (!CheckDigit(a["id"]) && a["id"] != "") {
+		ResponseJson(w, "Not Found", 404, nil)
+		return
+	}
+
+	archives = CreateArchivesQuery("where channel_id = " + a["id"] + " limit " + count + " offset " + cursor)
 
 	defer func() {
 		ResponseJson(w, "OK", 200, archives)
@@ -174,6 +235,28 @@ func CreateArchivesQuery(query string) []Response_Archives {
 		archives = append(archives, k)
 	}
 	return archives
+}
+
+func CreateChannelsQuery(query string) []Response_Channels {
+
+	var channels []Response_Channels
+
+	db := mydb.MyDB{}
+	db.Connect()
+	defer db.Close()
+
+	rows := db.Query("select channel_id, channel_name, channel_url, channel_description, channel_key, article_num, article_impression_num, channel_category_id, category_name from V_channel " + query)
+	defer rows.Close()
+
+	for rows.Next() {
+		var k Response_Channels
+		err := rows.Scan(&k.Id, &k.Name, &k.Url, &k.Description, &k.Key, &k.Archive_number, &k.Impression_number, &k.Category_id, &k.Category_name)
+		if err != nil {
+			WriteErrorLogFile(err)
+		}
+		channels = append(channels, k)
+	}
+	return channels
 }
 
 func ResponseJson(w http.ResponseWriter, message string, code int, archives interface{}) {
